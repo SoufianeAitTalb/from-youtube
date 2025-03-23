@@ -11,7 +11,10 @@ def download_video(video_id, download_folder="downloaded_videos"):
 
         # yt-dlp options
         ydl_opts = {
-            'format': 'bestvideo[height<=2160]+bestaudio/best',  # Download best quality up to 1080p (or best available)
+            # 'format': 'bestvideo[height<=1080]+bestaudio/best',  # Download best quality up to 1080p (or best available)
+            'format': 'bestvideo[height<=480]+bestaudio[abr>=128][abr<=192]/best',
+            #low audio quality
+            # 'format': 'bestvideo[height<=144]+bestaudio[abr>=64][abr<=96]/best',
             'outtmpl': f'{download_folder}/{video_id}.%(ext)s',  # Output file name template
             'progress_hooks': [progress_callback],  # Add progress callback to show download progress
         }
@@ -21,13 +24,23 @@ def download_video(video_id, download_folder="downloaded_videos"):
             print(f"Downloading video: {video_id}")
             ydl.download([youtube_url])
 
-            # Get the downloaded file's extension and name
-            downloaded_file = f"{download_folder}/{video_id}.webm"  # After merging, it will be .webm
-            print(f"Download complete for video: {video_id}")
+            # Get the list of files in the download folder
+            files = os.listdir(download_folder)
 
-            # Return the path of the downloaded file
-            return downloaded_file
+            # Find the downloaded file with the correct extension
+            downloaded_file = None
+            for file in files:
+                if file.startswith(video_id):  # Check if the file matches the video ID
+                    downloaded_file = os.path.join(download_folder, file)
+                    break
 
+            # Check if we found the downloaded file
+            if downloaded_file:
+                print(f"Download complete for video: {video_id}")
+                return downloaded_file
+            else:
+                print("Error: Downloaded file not found.")
+                return None
     except Exception as e:
         print(f"Error downloading video: {e}")
         return None
