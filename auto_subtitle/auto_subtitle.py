@@ -4,7 +4,6 @@ from moviepy.editor import VideoFileClip
 from pysubs2 import SSAFile, SSAEvent, SSAStyle
 import subprocess
 
-
 def add_subtitles(video_path, model_size='large'):
     # Extract audio from video
     video = VideoFileClip(video_path)
@@ -20,29 +19,30 @@ def add_subtitles(video_path, model_size='large'):
     subs = SSAFile()
     subs.info.update({'PlayResX': '384', 'PlayResY': '288'})
 
-    # Base style for all languages
+    # Modern style parameters
     base_style = SSAStyle(
-        fontsize=20,
+        fontsize=24,
         primarycolor="&H00FFFFFF",
         outlinecolor="&H00000000",
-        backcolor="&H80000000",
+        backcolor="&HB0000000",  # Semi-transparent background
         bold=True,
-        outline=2,
-        shadow=0,
-        alignment=8,  # Bottom-center
-        marginv=35  # Position from bottom
+        outline=3,
+        shadow=2,
+        alignment=2,  # Bottom-center
+        marginv=40,
+        fontname="Arial Unicode MS"  # Better Unicode support
     )
 
     # Arabic-specific adjustments
     if detected_lang == 'AR':
         arabic_style = base_style.copy()
-        arabic_style.fontname = "Noto Naskh Arabic"  # Better Arabic support
+        arabic_style.fontname = "Noto Naskh Arabic"
         arabic_style.encoding = 1
-        arabic_style.marginv = 40  # Bottom position
+        arabic_style.alignment = 2  # Bottom-center
+        arabic_style.marginv = 45
         subs.styles["Arabic"] = arabic_style
         style_name = "Arabic"
     else:
-        base_style.fontname = "Arial"
         subs.styles["Default"] = base_style
         style_name = "Default"
 
@@ -53,9 +53,11 @@ def add_subtitles(video_path, model_size='large'):
         text_parts = []
         previous_end = line_start
 
-        words = segment['words']
+        words = segment.get('words', [])
+
+        # Reverse words for RTL languages to ensure correct display order
         if detected_lang == 'AR':
-            words = list(reversed(words))  # Reverse words for correct RTL display
+            words = list(reversed(words))
 
         for word in words:
             if (gap := word['start'] - previous_end) > 0.01:
@@ -65,24 +67,23 @@ def add_subtitles(video_path, model_size='large'):
             text_parts.append(f"{{\\k{int(word_duration * 100)}}}{word['word']}")
             previous_end = word['end']
 
-        # For Arabic: apply RTL tag to the entire line, not just the words
+        # Apply RTL formatting and modern styling
         if detected_lang == 'AR':
-            final_text = "{\\rtl}" + "".join(text_parts)  # Ensure full line is in RTL
+            final_text = "{\\rtl\\bord3\\shad2\\fs18}" + "".join(text_parts)
         else:
-            final_text = "".join(text_parts)
+            final_text = "{\\bord3\\shad2\\fs24}" + "".join(text_parts)
 
         event = SSAEvent(
             start=int(line_start * 1000),
             end=int(line_end * 1000),
             text=final_text,
-            style=style_name  # Ensure the style_name is correctly set to 'Arabic' or 'Default'
+            style=style_name
         )
         subs.append(event)
 
-    # Clean up by removing unwanted styles if any (e.g., 'tl')
-    for style in list(subs.styles):
-        if style == 'tl':  # Explicitly remove any reference to 'tl'
-            del subs.styles[style]
+    # Clean up any remaining 'tl' styles
+    if 'tl' in subs.styles:
+        del subs.styles['tl']
 
     # Save subtitles
     subs.save("temp_subs.ass")
@@ -103,7 +104,6 @@ def add_subtitles(video_path, model_size='large'):
     os.remove(audio_path)
     os.remove("temp_subs.ass")
 
-
 if __name__ == "__main__":
-    video_file = "vertical_jiCezbNBNQE_part_1.mp4"
-    add_subtitles(video_file, model_size='medium')  # You can choose between 'large', 'medium', 'base', 'tiny'
+    video_file = "arabic_test.mp4"
+    add_subtitles(video_file, model_size='medium')
