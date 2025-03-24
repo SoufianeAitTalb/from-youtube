@@ -3,11 +3,18 @@ import numpy as np
 import os
 import moviepy.editor as mpy
 
+# Get the absolute path of the directory containing this script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 def process_video(input_path, output_path):
-    # Load face detection model
-    model_file = "res10_300x300_ssd_iter_140000_fp16.caffemodel"
-    config_file = "deploy.prototxt"
+    # Convert input/output paths to absolute
+    input_path = os.path.abspath(input_path)
+    output_path = os.path.abspath(output_path)
+
+    # Load face detection model with absolute paths
+    model_file = os.path.join(SCRIPT_DIR, "models/res10_300x300_ssd_iter_140000_fp16.caffemodel")
+    config_file = os.path.join(SCRIPT_DIR, "models/deploy.prototxt")
     net = cv2.dnn.readNetFromCaffe(config_file, model_file)
 
     # Open input video
@@ -28,7 +35,7 @@ def process_video(input_path, output_path):
     target_width, target_height = 1080, 1920
 
     # Create temporary video file (without audio)
-    temp_output = "temp_video_no_audio.mp4"
+    temp_output = os.path.join(SCRIPT_DIR, "temp_video_no_audio.mp4")
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(temp_output, fourcc, fps, (target_width, target_height))
 
@@ -99,6 +106,10 @@ def process_video(input_path, output_path):
 
 
 def batch_process(input_dir, output_dir):
+    # Convert directories to absolute paths
+    input_dir = os.path.abspath(input_dir)
+    output_dir = os.path.abspath(output_dir)
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -115,11 +126,15 @@ def batch_process(input_dir, output_dir):
 
 
 if __name__ == "__main__":
-    input_directory = "./"
-    output_directory = "output_videos"
+    # Use absolute paths for default directories
+    input_directory = os.getcwd()
+    output_directory = os.path.join(SCRIPT_DIR, "output_videos")
 
-    # Check for required files
-    if not all(os.path.exists(f) for f in ["deploy.prototxt", "res10_300x300_ssd_iter_140000_fp16.caffemodel"]):
+    # Check for required files using absolute paths
+    model_path = os.path.join(SCRIPT_DIR, "models/res10_300x300_ssd_iter_140000_fp16.caffemodel")
+    config_path = os.path.join(SCRIPT_DIR, "models/deploy.prototxt")
+
+    if not all([os.path.exists(model_path), os.path.exists(config_path)]):
         print("Missing face detection models. Download:")
         print("https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt")
         print(

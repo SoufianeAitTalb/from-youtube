@@ -30,8 +30,8 @@ class ResponsiveKalmanFilter:
 
 def process_video(input_path, output_path):
     # Load face detection model
-    model_file = "res10_300x300_ssd_iter_140000_fp16.caffemodel"
-    config_file = "deploy.prototxt"
+    model_file = "models/res10_300x300_ssd_iter_140000_fp16.caffemodel"
+    config_file = "models/deploy.prototxt"
     net = cv2.dnn.readNetFromCaffe(config_file, model_file)
 
     # Initialize more responsive Kalman Filters

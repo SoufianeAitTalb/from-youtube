@@ -1,3 +1,6 @@
+import os.path
+
+from crop_video.crop_video_deep import batch_process
 from cut_video import cut_video
 from download_video import download_video
 from replayed_parts import get_replayed_parts
@@ -17,5 +20,6 @@ if __name__ == "__main__":
         if video_file:
             # Step 3: Cut the video into the replayed parts and save them
             cut_video(video_file,video_id, replayed_parts)
+            batch_process(os.path.abspath(f"video_parts/{video_id}"),os.path.abspath("cropped_video_parts"))
         else:
             print("Failed to download the video.")

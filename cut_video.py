@@ -12,7 +12,7 @@ def cut_video(video_file,video_id, replayed_parts):
         end_time = part["end"]
 
         # Correctly create the output filename without including the full video path
-        output_filename = os.path.join(output_dir, f"part_{part['position']}.mp4")
+        output_filename = os.path.join(output_dir, f"{video_id}_part_{part['position']}.mp4")
 
         # Using moviepy to extract the part of the video
         try:
