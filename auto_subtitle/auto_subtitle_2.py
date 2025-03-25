@@ -33,8 +33,8 @@ def add_subtitles(video_path, model_size='large'):
         bold=True,
         outline=3,
         shadow=2,
-        alignment=9,  # Bottom-right alignment
-        margin_v=40,
+        alignment=2,  # Changed to bottom-center
+        margin_v=40,   # Vertical margin from bottom
         encoding=1,
     )
     doc.styles.append(arabic_style)
@@ -45,9 +45,9 @@ def add_subtitles(video_path, model_size='large'):
         line_end = segment['end']
         text_parts = []
         previous_end = line_start
+        full_text = []
 
         words = segment.get('words', [])
-        full_text = []
 
         for word in words:
             if (gap := word['start'] - previous_end) > 0.01:
@@ -56,31 +56,28 @@ def add_subtitles(video_path, model_size='large'):
             word_duration = word['end'] - word['start']
             word_text = word['word']
 
+            # Process Arabic text
             if detected_lang == 'AR':
-                # Process Arabic text shaping and bidirectional layout
                 reshaped = reshape(word_text)
                 bidi_text = get_display(reshaped)
                 full_text.append(bidi_text)
+                # White text with black background and highlight
                 text_parts.append(
-                    f"{{\\k{int(word_duration * 100)}}}" +
-                    f"{{\\1c&H00FFFF&\\3c&H000000&}}{bidi_text}"
+                    f"{{\\k{int(word_duration * 100)}}}"
+                    f"{{\\1c&HFFFFFF&\\3c&H000000&\\4a&H64&}}{bidi_text}"
                 )
-            else:
-                text_parts.append(
-                    f"{{\\k{int(word_duration * 100)}}}" +
-                    f"{{\\1c&H00FFFF&\\3c&H000000&}}{word_text}"
-                )
-
             previous_end = word['end']
 
-        # Handle RTL for Arabic
+        # RTL formatting
         if detected_lang == 'AR':
-            # Combine all words and reverse order for proper RTL display
             full_line = ' '.join(full_text[::-1])
             reshaped_line = get_display(reshape(full_line))
             final_text = f"{{\\r}}{reshaped_line}"
         else:
             final_text = "".join(text_parts)
+
+        # Add animated background for highlighting
+        final_text = f"{{\\fad(300,300)}}{final_text}"
 
         doc.events.append(
             ass.Dialogue(
