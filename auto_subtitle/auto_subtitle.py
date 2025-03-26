@@ -6,17 +6,23 @@ import ass
 from arabic_reshaper import reshape
 from bidi.algorithm import get_display
 
+
 def seconds_to_ass_time(seconds: float) -> str:
     """Convert seconds to ASS time format (H:MM:SS.CS)"""
     hours, remainder = divmod(seconds, 3600)
     minutes, remainder = divmod(remainder, 60)
     seconds, centiseconds = divmod(remainder, 1)
-    return f"{int(hours)}:{int(minutes):02d}:{int(seconds):02d}.{int(centiseconds*100):02d}"
+    return f"{int(hours)}:{int(minutes):02d}:{int(seconds):02d}.{int(centiseconds * 100):02d}"
 
-def add_subtitles(video_path, model_size='large'):
+
+def add_subtitles(video_path, output_path, model_size='large'):
+    # Convert video_path to absolute if not already
+    video_path = os.path.abspath(video_path)
+    output_path = os.path.abspath(output_path)
+
     # Extract audio from video
     video = VideoFileClip(video_path)
-    audio_path = "temp_audio.wav"
+    audio_path = os.path.abspath("temp_audio.wav")
     video.audio.write_audiofile(audio_path, codec='pcm_s16le')
 
     # Transcribe audio with word-level timestamps
@@ -26,7 +32,6 @@ def add_subtitles(video_path, model_size='large'):
 
     # Create ASS document
     doc = ass.Document()
-    # Arabic style
     arabic_style = ass.Style(
         name="Arabic",
         fontname="Arial",
@@ -38,7 +43,6 @@ def add_subtitles(video_path, model_size='large'):
         margin_v=40,
         encoding=1,
     )
-    # Default style for other languages
     default_style = ass.Style(
         name="Default",
         fontname="Arial",
@@ -69,7 +73,6 @@ def add_subtitles(video_path, model_size='large'):
             word_duration = word['end'] - word['start']
             word_text = word['word']
 
-            # Process Arabic text
             if detected_lang == 'AR':
                 reshaped = reshape(word_text)
                 bidi_text = get_display(reshaped)
@@ -79,13 +82,11 @@ def add_subtitles(video_path, model_size='large'):
                     f"{{\\1c&HFFFFFF&\\3c&H000000&\\4a&H64&}}{bidi_text}"
                 )
             else:
-                # Handle other languages
                 text_parts.append(
                     f"{{\\k{int(word_duration * 100)}}}{word_text}"
                 )
             previous_end = word['end']
 
-        # RTL formatting for Arabic only
         if detected_lang == 'AR':
             full_line = ' '.join(full_text[::-1])
             reshaped_line = get_display(reshape(full_line))
@@ -93,7 +94,6 @@ def add_subtitles(video_path, model_size='large'):
         else:
             final_text = "".join(text_parts)
 
-        # Add animated background for highlighting
         final_text = f"{{\\fad(300,300)}}{final_text}"
 
         doc.events.append(
@@ -105,12 +105,9 @@ def add_subtitles(video_path, model_size='large'):
             )
         )
 
-    # Save subtitles
     with open("temp_subs.ass", "w", encoding="utf-8") as f:
         doc.dump_file(f)
 
-    # Burn subtitles into video
-    output_path = video_path.replace(".", "_subtitled.")
     subprocess.run([
         'ffmpeg',
         '-i', video_path,
@@ -120,10 +117,35 @@ def add_subtitles(video_path, model_size='large'):
         output_path
     ])
 
-    # Cleanup
     os.remove(audio_path)
     os.remove("temp_subs.ass")
 
+
+def batch_process(input_dir, output_dir):
+    input_dir = os.path.abspath(input_dir)
+    output_dir = os.path.abspath(output_dir)
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    video_files = [f for f in os.listdir(input_dir) if f.lower().endswith(('.mp4', '.avi', '.mov'))]
+    total_videos = len(video_files)
+
+    print(f"Found {total_videos} videos to process")
+
+    for idx, filename in enumerate(video_files, 1):
+        input_path = os.path.join(input_dir, filename)
+        base_name, ext = os.path.splitext(filename)
+        output_filename = f"{base_name}_subtitled{ext}"  # Add _subtitled BEFORE extension
+        output_path = os.path.join(output_dir, output_filename)
+        print(f"\nProcessing video {idx}/{total_videos}: {filename}")
+        add_subtitles(input_path, output_path,"medium")
+
 if __name__ == "__main__":
-    video_file = "arabic_test.mp4"
-    add_subtitles(video_file, model_size='medium')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    video_path = os.path.join(script_dir, "arabic_test.mp4")
+    base_name, ext = os.path.splitext(os.path.basename(video_path))
+    output_dir = os.path.join(script_dir, "subtitled")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"{base_name}_subtitled{ext}")
+    add_subtitles(video_path, output_path, model_size='base')

@@ -2,9 +2,9 @@ from moviepy.editor import VideoFileClip
 import os
 
 
-def cut_video(video_file,video_id, replayed_parts):
+def cut_video(video_file,video_id, replayed_parts,output_dir = "video_parts"):
     # Create an output directory to save the parts
-    output_dir = f"video_parts/{video_id}"
+
     os.makedirs(output_dir, exist_ok=True)
 
     for part in replayed_parts:
