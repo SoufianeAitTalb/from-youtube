@@ -1,17 +1,8 @@
 import os
 import whisper
 from moviepy.editor import VideoFileClip
+from pysubs2 import SSAFile, SSAEvent, SSAStyle
 import subprocess
-import ass
-from arabic_reshaper import reshape
-from bidi.algorithm import get_display
-
-def seconds_to_ass_time(seconds: float) -> str:
-    """Convert seconds to ASS time format (H:MM:SS.CS)"""
-    hours, remainder = divmod(seconds, 3600)
-    minutes, remainder = divmod(remainder, 60)
-    seconds, centiseconds = divmod(remainder, 1)
-    return f"{int(hours)}:{int(minutes):02d}:{int(seconds):02d}.{int(centiseconds*100):02d}"
 
 def add_subtitles(video_path, model_size='large'):
     # Extract audio from video
@@ -24,84 +15,90 @@ def add_subtitles(video_path, model_size='large'):
     result = model.transcribe(audio_path, word_timestamps=True)
     detected_lang = result['language'].upper()
 
-    # Create ASS document
-    doc = ass.Document()
-    arabic_style = ass.Style(
-        name="Arabic",
-        fontname="Arial",
+    # Configure subtitle styling
+    subs = SSAFile()
+    subs.info.update({'PlayResX': '384', 'PlayResY': '288'})
+
+    # Modern style parameters
+    base_style = SSAStyle(
         fontsize=24,
+        primarycolor="&H00FFFFFF",
+        outlinecolor="&H00000000",
+        backcolor="&HB0000000",  # Semi-transparent background
         bold=True,
         outline=3,
         shadow=2,
-        alignment=2,  # Changed to bottom-center
-        margin_v=40,   # Vertical margin from bottom
-        encoding=1,
+        alignment=2,  # Bottom-center
+        marginv=40,
+        fontname="Arial Unicode MS"  # Better Unicode support
     )
-    doc.styles.append(arabic_style)
-    style_name = "Arabic"
 
+    # Arabic-specific adjustments
+    if detected_lang == 'AR':
+        arabic_style = base_style.copy()
+        arabic_style.fontname = "Noto Naskh Arabic"
+        arabic_style.encoding = 1
+        arabic_style.alignment = 2  # Bottom-center
+        arabic_style.marginv = 45
+        subs.styles["Arabic"] = arabic_style
+        style_name = "Arabic"
+    else:
+        subs.styles["Default"] = base_style
+        style_name = "Default"
+
+    # Process segments with proper RTL handling
     for segment in result['segments']:
         line_start = segment['start']
         line_end = segment['end']
         text_parts = []
         previous_end = line_start
-        full_text = []
 
         words = segment.get('words', [])
+
+        # Reverse words for RTL languages to ensure correct display order
+        if detected_lang == 'AR':
+            words = list(reversed(words))
 
         for word in words:
             if (gap := word['start'] - previous_end) > 0.01:
                 text_parts.append(f"{{\\k{int(gap * 100)}}}")
 
             word_duration = word['end'] - word['start']
-            word_text = word['word']
-
-            # Process Arabic text
-            if detected_lang == 'AR':
-                reshaped = reshape(word_text)
-                bidi_text = get_display(reshaped)
-                full_text.append(bidi_text)
-                # White text with black background and highlight
-                text_parts.append(
-                    f"{{\\k{int(word_duration * 100)}}}"
-                    f"{{\\1c&HFFFFFF&\\3c&H000000&\\4a&H64&}}{bidi_text}"
-                )
+            text_parts.append(f"{{\\k{int(word_duration * 100)}}}{word['word']}")
             previous_end = word['end']
 
-        # RTL formatting
+        # Apply RTL formatting and modern styling
         if detected_lang == 'AR':
-            full_line = ' '.join(full_text[::-1])
-            reshaped_line = get_display(reshape(full_line))
-            final_text = f"{{\\r}}{reshaped_line}"
+            final_text = "{\\rtl\\bord3\\shad2\\fs18}" + "".join(text_parts)
         else:
-            final_text = "".join(text_parts)
+            final_text = "{\\bord3\\shad2\\fs24}" + "".join(text_parts)
 
-        # Add animated background for highlighting
-        final_text = f"{{\\fad(300,300)}}{final_text}"
-
-        doc.events.append(
-            ass.Dialogue(
-                start=seconds_to_ass_time(line_start),
-                end=seconds_to_ass_time(line_end),
-                style=style_name,
-                text=final_text,
-            )
+        event = SSAEvent(
+            start=int(line_start * 1000),
+            end=int(line_end * 1000),
+            text=final_text,
+            style=style_name
         )
+        subs.append(event)
+
+    # Clean up any remaining 'tl' styles
+    if 'tl' in subs.styles:
+        del subs.styles['tl']
 
     # Save subtitles
-    with open("temp_subs.ass", "w", encoding="utf-8") as f:
-        doc.dump_file(f)
+    subs.save("temp_subs.ass")
 
     # Burn subtitles into video
     output_path = video_path.replace(".", "_subtitled.")
-    subprocess.run([
+    ffmpeg_cmd = [
         'ffmpeg',
         '-i', video_path,
         '-vf', "ass=temp_subs.ass",
         '-c:a', 'copy',
         '-y',
         output_path
-    ])
+    ]
+    subprocess.run(ffmpeg_cmd)
 
     # Cleanup
     os.remove(audio_path)
