@@ -18,16 +18,16 @@ def create_subtitle_clip(text, start, end, video_size, is_rtl=False):
     txt_clip = TextClip(
         text,
         font='Arial',
-        fontsize=40,
+        fontsize=80,
         color='white',
-        bg_color='black',
-        size=(video_width - 100, None),
+        # bg_color='black',
+        size=(video_width - 50, None),
         method='caption',
         align='center'
     ).set_start(start).set_duration(duration)
 
     # Calculate vertical position (50 pixels from bottom)
-    y_position = video_height - 50
+    y_position = video_height - 400
     return txt_clip.set_position(('center', y_position))
 
 
