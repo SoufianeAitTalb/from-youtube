@@ -3,31 +3,85 @@ import whisper
 from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
 from arabic_reshaper import reshape
 from bidi.algorithm import get_display
+from PIL import ImageFont
+import numpy as np
 
 
-def create_subtitle_clip(text, start, end, video_size, is_rtl=False):
-    """Create a subtitle clip with proper positioning"""
-    duration = end - start
+def calculate_text_width(text, font_path='Arial.ttf', font_size=80):
+    """Calculate text width using PIL"""
+    font = ImageFont.truetype(font_path, font_size)
+    return font.getlength(text)
+
+
+def create_highlighted_subtitles(segment, video_size, is_rtl=False):
+    """Create subtitle clips with word highlights"""
     video_width, video_height = video_size
+    words = segment.get('words', [])
+    if not words:
+        return []
+
+    # Create full text for the segment
+    full_text = ' '.join([word['word'].strip() for word in words])
 
     # Reshape and directionize Arabic text
     # if is_rtl:
-        # text = get_display(reshape(text))
+    #     full_text = get_display(reshape(full_text))
 
-    # Create text clip with proper positioning
-    txt_clip = TextClip(
-        text,
-        font='Arial',
+    # Create base text clip (white, full line)
+    base_clip = TextClip(
+        full_text,
+        font='Arial.ttf',
         fontsize=80,
         color='white',
         size=(video_width - 50, None),
         method='caption',
         align='center'
-    ).set_start(start).set_duration(duration)
+    ).set_start(segment['start']).set_duration(segment['end'] - segment['start'])
 
-    # Calculate vertical position (50 pixels from bottom)
+    # Calculate vertical position
     y_position = video_height - 400
-    return txt_clip.set_position(('center', y_position))
+    base_clip = base_clip.set_position(('center', y_position))
+
+    highlight_clips = [base_clip]
+
+    # Create word highlight clips
+    for word in words:
+        word_text = word['word'].strip()
+        start_time = word['start']
+        end_time = word['end']
+
+        # Calculate position of the word in the full text
+        prefix = ' '.join([w['word'].strip() for w in words[:words.index(word)]])
+        if is_rtl:
+            prefix = ' '.join([w['word'].strip() for w in words[words.index(word) + 1:]])
+
+        # Calculate widths using accurate measurements
+        full_width = calculate_text_width(full_text)
+        prefix_width = calculate_text_width(prefix + ' ') if prefix else 0
+        word_width = calculate_text_width(word_text)
+
+        # Calculate base text positioning accounting for container width
+        container_width = video_width - 50
+        text_x_offset = (container_width - full_width) // 2  # Center within subtitle area
+        base_x_position = (video_width - container_width) // 2  # 25px padding
+
+        # Final position calculation
+        x_position = base_x_position + text_x_offset + prefix_width
+
+        # Create highlight clip with precise positioning
+        highlight_clip = TextClip(
+            word_text,
+            font='Arial.ttf',
+            fontsize=80,
+            color='yellow',
+            size=(word_width, None),
+            method='caption',
+            align='East'  # Changed to left alignment for precise positioning
+        ).set_start(start_time).set_duration(end_time - start_time)
+
+        highlight_clip = highlight_clip.set_position((x_position, y_position))
+        highlight_clips.append(highlight_clip)
+    return highlight_clips
 
 
 def add_subtitles(video_path, output_path, model_size='base'):
@@ -48,23 +102,10 @@ def add_subtitles(video_path, output_path, model_size='base'):
     detected_lang = result['language'].upper()
     is_rtl = detected_lang == 'AR'
 
-    # Create subtitle clips for each word
+    # Create subtitle clips
     subtitle_clips = []
     for segment in result['segments']:
-        words = segment.get('words', [])
-        for word in words:
-            text = word['word'].strip()
-            start_time = word['start']
-            end_time = word['end']
-
-            subtitle_clip = create_subtitle_clip(
-                text,
-                start_time,
-                end_time,
-                video_size,
-                is_rtl
-            )
-            subtitle_clips.append(subtitle_clip)
+        subtitle_clips.extend(create_highlighted_subtitles(segment, video_size, is_rtl))
 
     # Composite video with subtitles
     final_video = CompositeVideoClip([video] + subtitle_clips)
