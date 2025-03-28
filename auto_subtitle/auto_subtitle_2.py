@@ -12,7 +12,7 @@ def create_subtitle_clip(text, start, end, video_size, is_rtl=False):
 
     # Reshape and directionize Arabic text
     # if is_rtl:
-    #     text = get_display(reshape(text))
+        # text = get_display(reshape(text))
 
     # Create text clip with proper positioning
     txt_clip = TextClip(
@@ -20,7 +20,6 @@ def create_subtitle_clip(text, start, end, video_size, is_rtl=False):
         font='Arial',
         fontsize=80,
         color='white',
-        # bg_color='black',
         size=(video_width - 50, None),
         method='caption',
         align='center'
@@ -49,23 +48,23 @@ def add_subtitles(video_path, output_path, model_size='base'):
     detected_lang = result['language'].upper()
     is_rtl = detected_lang == 'AR'
 
-    # Create subtitle clips
+    # Create subtitle clips for each word
     subtitle_clips = []
     for segment in result['segments']:
         words = segment.get('words', [])
-        if not words:
-            continue
+        for word in words:
+            text = word['word'].strip()
+            start_time = word['start']
+            end_time = word['end']
 
-        # Combine words into phrases
-        full_text = ' '.join([word['word'].strip() for word in words])
-        subtitle_clip = create_subtitle_clip(
-            full_text,
-            segment['start'],
-            segment['end'],
-            video_size,
-            is_rtl
-        )
-        subtitle_clips.append(subtitle_clip)
+            subtitle_clip = create_subtitle_clip(
+                text,
+                start_time,
+                end_time,
+                video_size,
+                is_rtl
+            )
+            subtitle_clips.append(subtitle_clip)
 
     # Composite video with subtitles
     final_video = CompositeVideoClip([video] + subtitle_clips)
