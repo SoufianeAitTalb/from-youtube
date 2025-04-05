@@ -1,9 +1,12 @@
 import os
 import random
+from pathlib import Path
 
+from dotenv import load_dotenv
+from numba.scripts.generate_lower_listing import description
 from selenium import webdriver
 from selenium.common import NoSuchElementException, ElementNotInteractableException
-from selenium.webdriver import ActionChains
+from selenium.webdriver import ActionChains, Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -39,12 +42,20 @@ def upload_to_tiktok_studio(video_path: str, description:str = "",hour:str = 21,
         WebDriverWait(driver,10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div.public-DraftEditor-content[contenteditable="true"]')))
 
         editable_div = driver.find_element(By.CSS_SELECTOR, 'div.public-DraftEditor-content[contenteditable="true"]')
-
+        editable_div.click()
         # Clear the existing text (optional, only if you want to remove the "english_test" text)
-        editable_div.clear()
+        editable_div.send_keys(Keys.PAGE_DOWN)
+        editable_div.send_keys(Keys.CONTROL + 'A')
+        editable_div.send_keys(Keys.BACKSPACE)
 
         # Add new text
+        # editable_div.send_keys(description)
+        # Simulate typing each character with a delay
+        # for char in description:
+        #     editable_div.send_keys(char)  # Send each character to the contenteditable div
         editable_div.send_keys(description)
+        # Optional: wait for a few seconds to see the result
+        time.sleep(2)
         print("done2 - description")
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//span[contains(text(),'Programmer')]/ancestor::label")))
         radio_button = driver.find_element(By.XPATH, "//span[contains(text(),'Programmer')]/ancestor::label")
@@ -72,7 +83,7 @@ def upload_to_tiktok_studio(video_path: str, description:str = "",hour:str = 21,
         i=0
         while True:
             try :
-                WebDriverWait(driver, 6).until(EC.presence_of_element_located((By.XPATH,
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH,
                                                    f"//span[contains(text(),{hour})]/ancestor::div[@class='tiktok-timepicker-option-item']")))
                 hour_selector = driver.find_element(By.XPATH,
                 f"//span[contains(text(),{hour})]/ancestor::div[@class='tiktok-timepicker-option-item']")
@@ -81,7 +92,7 @@ def upload_to_tiktok_studio(video_path: str, description:str = "",hour:str = 21,
                 break
             except (NoSuchElementException, ElementNotInteractableException):
                 print(f"Day {day} not found, scrolling...{i}")
-                WebDriverWait(driver, 6).until(EC.presence_of_element_located((By.CLASS_NAME,
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME,
                                                                                "tiktok-timepicker-time-scroll-container")))
 
                 time_picker_container = driver.find_element(By.CLASS_NAME, "tiktok-timepicker-time-scroll-container")
@@ -122,7 +133,7 @@ def upload_to_tiktok_studio(video_path: str, description:str = "",hour:str = 21,
                                                   "favourite"
                                                   )
         favourite_audio_button.click()
-        print("don7")
+        print("done7")
         # Find all the music card containers
         WebDriverWait(driver,10).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".jsx-915372485.music-card-container")))
 
@@ -150,8 +161,19 @@ def upload_to_tiktok_studio(video_path: str, description:str = "",hour:str = 21,
                 print("Clicked the 'Utiliser' button!")
             except Exception as e:
                 print(f"Error clicking button: {e}")
+        print("done8")
+        WebDriverWait(driver,10).until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-e2e="editor_save_button"]')))
 
-        time.sleep(2)
+        editor_save_button = driver.find_element(By.CSS_SELECTOR, '[data-e2e="editor_save_button"]')
+        editor_save_button.click()
+        print("done9")
+        WebDriverWait(driver,10).until(EC.presence_of_element_located((By.XPATH, "//button[@data-e2e='post_video_button']")))
+
+        upload_video_button = driver.find_element(By.XPATH, "//button[@data-e2e='post_video_button']")
+        driver.execute_script("arguments[0].scrollIntoView(true);", upload_video_button)
+        upload_video_button.click()
+        print("done10")
+
 
 
 
@@ -179,65 +201,78 @@ def move_to_posted_folder(video_path, posted_folder):
 #     for i in range(16,23):
 #         hour = f"0{i}" if i < 10 else str(i)
 #         upload_to_tiktok_studio(
-#             video_path=r"C:\Users\soufa\OneDrive\Desktop\social media\scripts\tiktok_stuffs\english_test.mp4",
+#             video_path=r"C:\Users\soufa\OneDrive\Desktop\social media\scripts\tiktok_stuffs\3491666877311350405_58062198947_2024-11-01_720x1280_12338_Good morning_#usa #us #explore #explorepage #reels.mp4",
 #             description="Uploaded via remote debugging!",
 #             hour= hour,
 #             day='8'
 #         )
 #         print(f"working for {hour}")
 
-if __name__ == "__main__":
-    #lets say that we want  to post 3 videos per day
-
-    upload_to_tiktok_studio(
-            video_path=r"C:\Users\soufa\OneDrive\Desktop\social media\scripts\tiktok_stuffs\english_test.mp4",
-            description="Uploaded via remote debugging!",
-            hour= '21',
-            day='8'
-        )
-
-
-
-
-
 # if __name__ == "__main__":
-#     # Specify the folder where the videos are stored
-#     videos_folder = r"C:\Users\soufa\Downloads\LLLLL\lillyabellaa_w_audio_tt_automation_test"
-#     posted_folder = os.path.join(videos_folder, "posted")
+#     #lets say that we want  to post 3 videos per day
+#     video_path = r"C:\Users\soufa\OneDrive\Desktop\social media\scripts\tiktok_stuffs\3491666877311350405_58062198947_2024-11-01_720x1280_12338_Good morning_#usa #us #explore #explorepage #reels.mp4"
+#     description= Path(video_path).stem.split("_")[5]
+#     load_dotenv()
 #
-#     # Get a sorted list of video files in the folder (assuming they are MP4 files)
-#     video_files = [f for f in os.listdir(videos_folder) if f.endswith(".mp4")]
-#     video_files.sort()  # Sorting the files in lexicographical order (optional)
-#
-#     # Video counter to keep track of which video is being uploaded
-#     video_index = 0  # Start with the first video
-#
-#     # Loop to schedule 3 videos per day for 10 days (total 30 videos)
-#     for day in range(6, 16):  # 10 days
-#         for video_num in range(1, 4):  # 3 videos per day
-#             if video_index < len(video_files):  # Ensure there are videos left to upload
-#                 # Get the first video file
-#                 video_filename = video_files[video_index]
-#                 video_path = os.path.join(videos_folder, video_filename)
-#
-#                 # Construct the hour for scheduling (for example, "16", "17", "18")
-#                 hour = f"0{16 + video_num}" if 16 + video_num < 10 else str(16 + video_num)
-#
-#                 # Upload the video to TikTok
-#                 upload_to_tiktok_studio(
-#                     video_path=video_path,
-#                     description="Uploaded via remote debugging!",
-#                     hour=hour,
-#                     day=str(day)
-#                 )
-#
-#                 # Move the uploaded video to the 'posted' folder
-#                 # move_to_posted_folder(video_path, posted_folder)
-#
-#                 print(f"Posted {video_filename} for day {day}, hour {hour}")
-#
-#                 # Increment video_index for the next video
-#                 video_index += 1
-#             else:
-#                 print("No more videos left to upload.")
-#                 break  # Exit the loop if there are no more videos
+#     hashtags = os.getenv('HASHTAGS')
+#     upload_to_tiktok_studio(
+#             video_path=video_path,
+#             description=description+f" {hashtags}",
+#             hour= '21',
+#             day='8'
+#         )
+
+
+
+
+
+if __name__ == "__main__":
+    # Specify the folder where the videos are stored
+    videos_folder = r"C:\Users\soufa\Downloads\LLLLL\lillyabellaa_w_audio_tt_automation_test"
+    posted_folder = os.path.join(videos_folder, "posted")
+
+    # Get a sorted list of video files in the folder (assuming they are MP4 files)
+    video_files = [f for f in os.listdir(videos_folder) if f.endswith(".mp4")]
+    video_files.sort()  # Sorting the files in lexicographical order (optional)
+    load_dotenv()
+    hashtags = os.getenv('HASHTAGS')
+
+    # Video counter to keep track of which video is being uploaded
+    video_index = 0  # Start with the first video
+
+    # Loop to schedule 3 videos per day for 10 days (total 30 videos)
+    for day in range(10, 20):  # 10 days
+        for video_num in range(1, 4):  # 3 videos per day
+            if video_index < len(video_files):  # Ensure there are videos left to upload
+                # Get the first video file
+                video_filename = video_files[video_index]
+                video_path = os.path.join(videos_folder, video_filename)
+                description = Path(video_path).stem.split("_")[5]
+
+                # Construct the hour for scheduling (for example, "16", "17", "18")
+                hour = ""
+                if video_num == 1:
+                    hour = "09"
+                elif video_num == 2:
+                    hour="13"
+                elif video_num == 3:
+                    hour = "21"
+
+                # Upload the video to TikTok
+                upload_to_tiktok_studio(
+                    video_path=video_path,
+                    description=description+f" {hashtags}",
+                    hour=hour,
+                    day=str(day)
+                )
+
+                # Move the uploaded video to the 'posted' folder
+                move_to_posted_folder(video_path, posted_folder)
+
+                print(f"Posted {video_filename} for day {day}, hour {hour}")
+
+                # Increment video_index for the next video
+                video_index += 1
+            else:
+                print("No more videos left to upload.")
+                break  # Exit the loop if there are no more videos
