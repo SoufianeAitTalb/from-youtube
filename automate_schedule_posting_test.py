@@ -1,7 +1,9 @@
 import os
+import random
 
 from selenium import webdriver
 from selenium.common import NoSuchElementException, ElementNotInteractableException
+from selenium.webdriver import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -20,6 +22,7 @@ def upload_to_tiktok_studio(video_path: str, description:str = "",hour:str = 21,
 
     # Configure Chrome to connect to the open instance
     chrome_options = Options()
+    chrome_options.headless = False
     chrome_options.add_experimental_option("debuggerAddress", "localhost:9222")  # Connect via debug port
 
     # Initialize WebDriver (no need for Service/chromedriver)
@@ -73,6 +76,7 @@ def upload_to_tiktok_studio(video_path: str, description:str = "",hour:str = 21,
                                                    f"//span[contains(text(),{hour})]/ancestor::div[@class='tiktok-timepicker-option-item']")))
                 hour_selector = driver.find_element(By.XPATH,
                 f"//span[contains(text(),{hour})]/ancestor::div[@class='tiktok-timepicker-option-item']")
+                driver.execute_script("arguments[0].scrollIntoView(true);", hour_selector)
                 hour_selector.click()
                 break
             except (NoSuchElementException, ElementNotInteractableException):
@@ -118,6 +122,36 @@ def upload_to_tiktok_studio(video_path: str, description:str = "",hour:str = 21,
                                                   "favourite"
                                                   )
         favourite_audio_button.click()
+        print("don7")
+        # Find all the music card containers
+        WebDriverWait(driver,10).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".jsx-915372485.music-card-container")))
+
+        music_cards = driver.find_elements(By.CSS_SELECTOR, ".jsx-915372485.music-card-container")
+
+        if music_cards:
+            # random_card = music_cards[0]
+            random_card = random.choice(music_cards)
+
+            # Scroll into view to ensure the element is interactable
+            driver.execute_script("arguments[0].scrollIntoView(true);", random_card)
+
+            actions = ActionChains(driver)
+            actions.move_to_element(random_card).perform()
+
+            # Wait for the button to appear relative to the card
+            try:
+                # Wait for button within the card (note: adjust XPath as needed)
+                utiliser_button = WebDriverWait(random_card, 10).until(
+                    EC.visibility_of_element_located(
+                        (By.XPATH, ".//button[contains(@class, 'TUXButton') and normalize-space()='Utiliser']")
+                    )
+                )
+                utiliser_button.click()
+                print("Clicked the 'Utiliser' button!")
+            except Exception as e:
+                print(f"Error clicking button: {e}")
+
+        time.sleep(2)
 
 
 
