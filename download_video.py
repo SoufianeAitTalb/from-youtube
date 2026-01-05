@@ -6,6 +6,12 @@ def download_video(video_id, download_folder="downloaded_videos"):
     try:
         os.makedirs(download_folder, exist_ok=True)
         youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        # Check if file already exists
+        expected_filename = os.path.join(download_folder, f"{video_id}.mp4")
+        if os.path.exists(expected_filename):
+            print(f"File already exists: {expected_filename}. Skipping download.")
+            return expected_filename
 
         ydl_opts = {
             # More reliable format selection
@@ -42,7 +48,7 @@ def download_video(video_id, download_folder="downloaded_videos"):
 
     except Exception as e:
         print(f"Error downloading video: {str(e)}")
-        return None
+        raise e
 
 
 def progress_callback(d):

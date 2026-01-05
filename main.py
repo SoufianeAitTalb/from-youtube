@@ -8,7 +8,7 @@ from replayed_parts import get_replayed_parts
 
 # Main script
 if __name__ == "__main__":
-    video_id = "jiCezbNBNQE"  # Replace with the actual video ID
+    video_id = "ePdtJXjkBaM"  # Replace with the actual video ID
     number_of_parts = 3  # You can change this to get more parts
 
     # Step 1: Get the most replayed parts from the API

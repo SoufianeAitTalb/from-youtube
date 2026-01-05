@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-multipart
+yt-dlp
+moviepy
+simple-image-download
+opencv-python-headless
+numpy
+requests
+whisper
+openai-whisper
+pydantic
+aiofiles

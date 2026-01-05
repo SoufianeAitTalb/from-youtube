@@ -2,13 +2,15 @@ from moviepy.editor import VideoFileClip
 import os
 
 
-def cut_video(video_file,video_id, replayed_parts,output_dir = "video_parts"):
+def cut_video(video_file,video_id, replayed_parts,output_dir = "video_parts", log_callback=None):
     # Create an output directory to save the parts
 
     os.makedirs(output_dir, exist_ok=True)
 
-    for part in replayed_parts:
+    for idx, part in enumerate(replayed_parts):
         start_time = part["start"]
+        if log_callback:
+            log_callback(f"Cutting part {idx+1}/{len(replayed_parts)}: {start_time}s to {part['end']}s")
         end_time = part["end"]
 
         # Correctly create the output filename without including the full video path
