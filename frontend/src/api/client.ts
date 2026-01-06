@@ -22,7 +22,7 @@ export interface JobStatusResponse {
 }
 
 export const api = {
-    getReplayedParts: async (videoId: string, numberOfParts: number) => {
+    getReplayedParts: async (videoId: string, numberOfParts?: number) => {
         const res = await axios.get(`http://localhost:8001/most-replayed`, { params: { videoId, numberOfParts } });
         return res.data.replayedParts;
     },
