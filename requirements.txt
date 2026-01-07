@@ -11,3 +11,4 @@ whisper
 openai-whisper
 pydantic
 aiofiles
+google-generativeai

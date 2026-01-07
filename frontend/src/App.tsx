@@ -5,8 +5,11 @@ import { api } from './api/client';
 import { Timeline } from './components/Timeline';
 import { LogConsole } from './components/LogConsole';
 import { VideoPartEditor } from './components/VideoPartEditor';
-import { Play, RotateCcw, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Play, RotateCcw, PanelLeftClose, PanelLeftOpen, Search, Download, Scissors, Crop, FileText, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
+import { Button } from './components/ui/Button';
+import { Card, CardContent, CardHeader, CardTitle } from './components/ui/Card';
+import { Badge } from './components/ui/Badge';
 
 function App() {
   const store = useStore();
@@ -34,19 +37,6 @@ function App() {
       const intervalId = setInterval(async () => {
         try {
           const job = await api.getJobStatus(jobId);
-
-          // Update logs (append only new ones would be better, but replacing or appending difference is okay for now)
-          // Since our backend returns ALL logs, we can just check length or replace if we want simple logic.
-          // But our store has `appendLog`. Let's just update the whole logs array in `updateStep` if we change store logic,
-          // OR iterate and append new ones. 
-          // For simplicity in this PoC: let's assume we handle log diffing or just don't duplicate.
-          // Actually, our `store.appendLog` appends. If backend returns ALL logs, we shouldn't append blindly.
-          // Let's rely on `updateStep` to overwrite logs if we want, OR just check length.
-
-          // Hack: just replace logs for now to ensure consistency, requiring store update
-          // But store only has appendLog. Let's fix this by adding setLogs to store or just handle it here.
-          // Wait, `updateStep` takes Partial<StepState>. So we can pass `logs: job.logs`.
-
           store.updateStep(step, {
             logs: job.logs,
             progress: job.progress
@@ -65,7 +55,6 @@ function App() {
           }
         } catch (e) {
           console.error("Polling error", e);
-          // Don't fail immediately on network glitch, just retry next tick
         }
       }, 1000); // Poll every 1s
 
@@ -147,123 +136,156 @@ function App() {
 
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm z-10 transition-all">
+    <div className="flex flex-col h-screen bg-gray-50/50">
+      {/* Glass Header */}
+      <header className="glass sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 hover:bg-gray-100 rounded-md text-gray-600 transition-colors"
             title={isSidebarOpen ? "Close Sidebar" : "Open Sidebar"}
           >
             {isSidebarOpen ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />}
-          </button>
-          <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-            <Play className="w-6 h-6 text-red-600 fill-current" />
-            YouTube Processor
-          </h1>
+          </Button>
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-indigo-600 rounded-xl shadow-lg shadow-indigo-200">
+              <Play className="w-5 h-5 text-white fill-current" />
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-gray-900">
+              Antigravity <span className="text-indigo-600">VideoLab</span>
+            </h1>
+          </div>
         </div>
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={store.reset}
-            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+            className="gap-2"
           >
             <RotateCcw className="w-4 h-4" />
-            Reset Pipeline
-          </button>
+            Reset
+          </Button>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden">
-        {/* Sidebar with Transition */}
+        {/* Sidebar */}
         <div className={clsx(
-          "transition-all duration-300 ease-in-out border-r border-gray-200 bg-white overflow-hidden",
-          isSidebarOpen ? "w-80 opacity-100" : "w-0 opacity-0 border-r-0"
+          "transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] border-r border-gray-200 bg-white overflow-hidden shadow-sm z-40",
+          isSidebarOpen ? "w-80 opacity-100 translate-x-0" : "w-0 opacity-0 -translate-x-full border-r-0"
         )}>
-          <div className="w-80 h-full">
+          <div className="w-80 h-full p-4">
             <Timeline />
           </div>
         </div>
 
         <div className="flex-1 flex flex-col overflow-hidden relative">
 
-          {/* Scrollable Content Area - Inputs are now INSIDE here */}
+          {/* Scrollable Content Area */}
           <div
-            className="flex-1 bg-gray-50 overflow-y-auto scroll-smooth"
+            className="flex-1 overflow-y-auto scroll-smooth p-4 md:p-8"
             onScroll={handleScroll}
             ref={scrollContainerRef}
           >
-            <div className="max-w-6xl mx-auto">
-              {/* Inputs Area - Now flows with scroll */}
-              <div className="p-6 bg-white border-b border-gray-200 mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">YouTube Video ID / URL</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={store.videoId}
-                        onChange={e => store.setVideoId(e.target.value)}
-                        placeholder="e.g. dQw4w9WgXcQ"
-                        className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
-                      />
+            <div className="max-w-5xl mx-auto space-y-8">
+
+              {/* Hero Input Section */}
+              <section className="space-y-4 text-center py-8">
+                <h2 className="text-4xl font-bold tracking-tighter text-gray-900 sm:text-5xl">
+                  Create Viral Shorts from <br />
+                  <span className="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">YouTube Videos</span>
+                </h2>
+                <p className="text-gray-500 max-w-2xl mx-auto text-lg">
+                  Paste a link, select key moments, and generate captioned vertical videos instantly.
+                </p>
+
+                <div className="max-w-2xl mx-auto mt-8 relative">
+                  <div className="flex gap-2 p-1.5 bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 items-center">
+                    <div className="pl-4 text-gray-400">
+                      <Search className="w-5 h-5" />
                     </div>
-                  </div>
-                  {/* Number of Parts Input Removed for Auto-Detection */}
-                </div>
-              </div>
-
-              {/* Step Details & Visuals */}
-              <div className="p-6 space-y-8 pb-32"> {/* Added padding bottom for console clearance if needed */}
-
-                {/* Actions Panel */}
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                  <h2 className="text-lg font-medium text-gray-900 mb-4">Pipeline Controls</h2>
-                  <div className="flex flex-wrap gap-4">
-                    <StepButton
-                      label="1. Fetch Parts"
+                    <input
+                      type="text"
+                      value={store.videoId}
+                      onChange={e => store.setVideoId(e.target.value)}
+                      placeholder="Paste YouTube Link or ID (e.g. dQw4w9WgXcQ)"
+                      className="flex-1 border-none bg-transparent focus:ring-0 text-lg placeholder:text-gray-400 py-3"
+                    />
+                    <Button
+                      size="lg"
                       onClick={runFetch}
                       disabled={!store.videoId || store.steps.fetch.status === 'running'}
-                      status={store.steps.fetch.status}
-                    />
-                    <StepButton
-                      label="2. Download"
-                      onClick={runDownload}
-                      disabled={!store.replayedParts.length || store.steps.download.status === 'running'}
-                      status={store.steps.download.status}
-                    />
-                    <StepButton
-                      label="3. Cut"
-                      onClick={runCut}
-                      disabled={!store.downloadedFilePath || store.steps.cut.status === 'running'}
-                      status={store.steps.cut.status}
-                    />
-                    <StepButton
-                      label="4. Crop Vertical"
-                      onClick={runCrop}
-                      disabled={store.steps.cut.status !== 'success' || store.steps.crop.status === 'running'}
-                      status={store.steps.crop.status}
-                    />
-                    <StepButton
-                      label="5. Add Subtitles"
-                      onClick={runSubtitles}
-                      disabled={store.steps.crop.status !== 'success' || store.steps.subtitles.status === 'running'}
-                      status={store.steps.subtitles.status}
-                    />
+                      className="rounded-xl px-8"
+                    >
+                      {store.steps.fetch.status === 'running' ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                      Analyze
+                    </Button>
                   </div>
                 </div>
+              </section>
 
-                {/* Editor - Show if we have downloaded video and parts */}
-                {store.replayedParts.length > 0 && store.downloadedFilePath && (
+              {/* Pipeline Controls */}
+              {/* Only show controls if analyzed or manual ID input provided */}
+              <Card className="overflow-hidden border-0 shadow-xl shadow-indigo-100/50 ring-1 ring-gray-100">
+                <CardHeader className="bg-white/50 border-b border-gray-100">
+                  <CardTitle>Processing Pipeline</CardTitle>
+                </CardHeader>
+                <CardContent className="p-6">
+                  <div className="flex flex-wrap gap-4 justify-center">
+                    {/* Fetch step handled above, but can repeat status here */}
+
+                    <StepCard
+                      icon={<Download className="w-5 h-5" />}
+                      label="Download Source"
+                      status={store.steps.download.status}
+                      onClick={runDownload}
+                      disabled={!store.replayedParts.length}
+                    />
+
+                    <StepCard
+                      icon={<Scissors className="w-5 h-5" />}
+                      label="Cut Segments"
+                      status={store.steps.cut.status}
+                      onClick={runCut}
+                      disabled={!store.downloadedFilePath}
+                    />
+
+                    <StepCard
+                      icon={<Crop className="w-5 h-5" />}
+                      label="Smart Crop"
+                      status={store.steps.crop.status}
+                      onClick={runCrop}
+                      disabled={store.steps.cut.status !== 'success'}
+                    />
+
+                    <StepCard
+                      icon={<FileText className="w-5 h-5" />}
+                      label="Auto Captions"
+                      status={store.steps.subtitles.status}
+                      onClick={runSubtitles}
+                      disabled={store.steps.crop.status !== 'success'}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Editor */}
+              {store.replayedParts.length > 0 && store.downloadedFilePath && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+                  <h3 className="text-xl font-bold text-gray-900 mb-4 px-1">Clip Editor</h3>
                   <VideoPartEditor
                     parts={store.replayedParts}
                     onPartsChange={store.setReplayedParts}
                     videoUrl={`http://localhost:8001/outputs/${store.downloadedFilePath.split('processing_output')[1]?.replace(/^[\\/]/, '')}`}
                   />
-                )}
+                </div>
+              )}
 
-                {/* Outputs */}
+              {/* Outputs List */}
+              <div className="space-y-4">
                 {Object.entries(store.steps).map(([stepId, state]) => {
                   if (stepId === 'fetch' || !state.outputs && !state.result?.outputs && !state.result?.parts) return null;
 
@@ -271,26 +293,37 @@ function App() {
                   if (!items.length) return null;
 
                   return (
-                    <div key={stepId} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                      <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between">
-                        <h3 className="font-medium text-gray-900 capitalize">{stepId} Outputs</h3>
-                      </div>
-                      <ul className="divide-y divide-gray-200">
+                    <Card key={stepId} className="overflow-hidden animate-in fade-in">
+                      <CardHeader className="py-4 bg-gray-50/50 border-b border-gray-100 flex flex-row items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="capitalize">{stepId}</Badge>
+                          <h4 className="font-medium text-gray-700">Generated Files</h4>
+                        </div>
+                        <Badge variant="secondary">{items.length} files</Badge>
+                      </CardHeader>
+                      <div className="divide-y divide-gray-100">
                         {items.map((item: any, i: number) => (
-                          <li key={i} className="px-6 py-4 flex items-center justify-between">
-                            <div className="text-sm text-gray-900 truncate max-w-lg">{item.path}</div>
-                            {/* In a real app we would serve these files via static file server */}
-                            <span className="text-xs text-gray-500">
-                              {item.path.split(/[\\/]/).pop()}
-                            </span>
-                          </li>
+                          <div key={i} className="px-6 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors group">
+                            <div className="flex items-center gap-3 overflow-hidden">
+                              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-100 transition-colors">
+                                <FileText className="w-4 h-4" />
+                              </div>
+                              <div className="text-sm font-medium text-gray-700 truncate max-w-md">
+                                {item.path.split(/[\\/]/).pop()}
+                              </div>
+                            </div>
+                            <Button size="sm" variant="ghost" className="text-gray-400 hover:text-indigo-600">
+                              Open
+                            </Button>
+                          </div>
                         ))}
-                      </ul>
-                    </div>
+                      </div>
+                    </Card>
                   );
                 })}
-
               </div>
+
+              <div className="h-32"></div> {/* Spacer */}
             </div>
           </div>
 
@@ -304,21 +337,55 @@ function App() {
   );
 }
 
-function StepButton({ label, onClick, disabled, status }: any) {
+function StepCard({ icon, label, status, onClick, disabled }: any) {
+  const isRunning = status === 'running';
+  const isSuccess = status === 'success';
+  const isFailed = status === 'failed';
+
   return (
     <button
       onClick={onClick}
-      disabled={disabled}
+      disabled={disabled || isRunning}
       className={clsx(
-        "px-4 py-2 rounded-md text-sm font-medium transition-colors border shadow-sm",
-        status === 'running' ? "bg-blue-50 text-blue-700 border-blue-200" :
-          status === 'success' ? "bg-green-50 text-green-700 border-green-200" :
-            status === 'failed' ? "bg-red-50 text-red-700 border-red-200" :
-              disabled ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed" :
-                "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+        "relative flex flex-col items-center gap-3 p-6 rounded-2xl border transition-all duration-200 w-40",
+        isSuccess
+          ? "bg-emerald-50 border-emerald-200 text-emerald-900 ring-1 ring-emerald-100"
+          : isFailed
+            ? "bg-red-50 border-red-200 text-red-900 ring-1 ring-red-100"
+            : disabled
+              ? "bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed"
+              : "bg-white border-gray-200 text-gray-600 hover:border-indigo-300 hover:shadow-lg hover:-translate-y-1 hover:text-indigo-600"
       )}
     >
-      {label}
+      {isSuccess && (
+        <div className="absolute top-2 right-2 text-emerald-600">
+          <CheckCircle2 className="w-4 h-4" />
+        </div>
+      )}
+      {isFailed && (
+        <div className="absolute top-2 right-2 text-red-600">
+          <AlertCircle className="w-4 h-4" />
+        </div>
+      )}
+
+      <div className={clsx(
+        "p-3 rounded-xl transition-colors",
+        isSuccess ? "bg-emerald-100 text-emerald-700" :
+          isFailed ? "bg-red-100 text-red-700" :
+            disabled ? "bg-gray-100 text-gray-300" :
+              "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"
+      )}>
+        {isRunning ? <Loader2 className="w-6 h-6 animate-spin" /> : icon}
+      </div>
+
+      <span className="font-semibold text-sm">{label}</span>
+
+      {/* Progress Bar for running state */}
+      {isRunning && (
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-100 rounded-b-2xl overflow-hidden">
+          <div className="h-full bg-indigo-500 animate-progress origin-left"></div>
+        </div>
+      )}
     </button>
   );
 }

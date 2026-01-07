@@ -5,6 +5,8 @@ from backend.api import router as api_router
 import requests
 import json
 import re
+import time
+import random
 import numpy as np
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
@@ -30,7 +32,7 @@ def read_root():
     return {"message": "Welcome to YouTube Processing API"}
 
 # Helper: Fetch and Parse Subtitles
-def get_params_for_subtitles(info):
+def get_params_for_subtitles(info, video_id=None):
     subs = info.get('subtitles') or {}
     auto_subs = info.get('automatic_captions') or {}
     
@@ -56,8 +58,40 @@ def get_params_for_subtitles(info):
                 
     if not url: return []
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    # Use headers from yt-dlp info if available
+    if info.get('http_headers') and info['http_headers'].get('User-Agent'):
+        headers['User-Agent'] = info['http_headers']['User-Agent']
+
+    resp = None
+    for attempt in range(3):
+        try:
+            print(f"Fetching subtitles from: {url} (Attempt {attempt+1})")
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                break
+            elif resp.status_code == 429:
+                wait_time = (2 ** attempt) + random.random()
+                print(f"Got 429, waiting {wait_time:.1f}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"Subtitle fetch failed: {resp.status_code} - {resp.text[:200]}")
+                # For non-429 errors, we might want to fail fast or continue. 
+                # YouTube often returns 4xx for expired URLs, so maybe just failing is correct.
+                # But let's retry 403 just in case? Usually 403 is fatal without fresh sig.
+                pass 
+        except Exception as e:
+            print(f"Request error: {e}")
+            time.sleep(1)
+            
+    if not resp or resp.status_code != 200:
+        print("Failed to fetch subtitles after retries.")
+        return []
+
     try:
-        resp = requests.get(url)
         data = resp.json()
         
         # Parse JSON3 to simple list of {start, end, text}
@@ -82,7 +116,45 @@ def get_params_for_subtitles(info):
         return events
     except Exception as e:
         print(f"Error fetching subtitles: {e}")
-        return []
+        try:
+             print(f"Response content debug: {resp.text[:500]}")
+        except: pass
+        
+    # Fallback to youtube-transcript-api if available and requests failed
+    if YouTubeTranscriptApi and video_id:
+        print("Trying youtube-transcript-api fallback...")
+        try:
+            # Handle version differences (static vs instance)
+            if hasattr(YouTubeTranscriptApi, 'get_transcript'):
+                data = YouTubeTranscriptApi.get_transcript(video_id)
+                # Standad format: list of dicts {text, start, duration}
+                events = []
+                for item in data:
+                    events.append({
+                        "start": item['start'],
+                        "end": item['start'] + item['duration'],
+                        "text": item['text']
+                    })
+                print(f"Fallback success! Found {len(events)} lines.")
+                return events
+            else:
+                # Assuming quirk 1.2.3 version (instance method)
+                api = YouTubeTranscriptApi()
+                trans = api.fetch(video_id)
+                if trans and hasattr(trans, 'snippets'):
+                    events = []
+                    for s in trans.snippets:
+                         events.append({
+                            "start": s.start,
+                            "end": s.start + s.duration,
+                            "text": s.text
+                        })
+                    print(f"Fallback success! Found {len(events)} lines.")
+                    return events
+        except Exception as e:
+            print(f"Fallback failed: {e}")
+
+    return []
 
 def align_to_sentence(start, end, subtitles):
     if not subtitles:
@@ -147,6 +219,102 @@ def align_to_sentence(start, end, subtitles):
 
     return round(new_start, 2), round(new_end, 2)
 
+import google.generativeai as genai
+import os
+import warnings
+
+# Suppress warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
+try:
+    from youtube_transcript_api import YouTubeTranscriptApi
+except ImportError:
+    YouTubeTranscriptApi = None
+
+# Configure Gemini
+# NOTE: In production, use os.environ.get("GEMINI_API_KEY")
+GENAI_API_KEY = "AIzaSyBa5XEk8enhhzI-QCJptFOigttDyYwmMFU"
+genai.configure(api_key=GENAI_API_KEY)
+
+# Helper: Analyze with Gemini
+def analyze_with_gemini(transcript_events):
+    if not transcript_events:
+        return None
+
+    full_text = " ".join([e['text'] for e in transcript_events])
+    
+    # Estimate token count roughly (4 chars per token) to avoid limit? 
+    # Gemini 1.5 Flash has huge context, so 5 mins of text is fine.
+
+    prompt = f"""
+    You are an expert video editor specialized in creating viral YouTube Shorts and TikToks.
+    Below is a transcript from a high-engagement section of a video.
+    
+    Your goal: Identify the SINGLE most engaging, funny, or interesting continuous segment suitable for a Short (15 to 60 seconds).
+    
+    Transcript:
+    "{full_text}"
+    
+    Instructions:
+    1. Select a continuous part that stands on its own (has a hook and a punchline/conclusion).
+    2. Ensure the duration is between 15s and 60s (approx 40-160 words).
+    3. Return the EXACT start phrase (first 5-10 words) and end phrase (last 5-10 words) of your selected clip.
+    
+    Output Format (JSON):
+    {{
+        "start_phrase": "...",
+        "end_phrase": "...",
+        "reason": "..."
+    }}
+    """
+    
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+        result = json.loads(response.text)
+        return result
+    except Exception as e:
+        print(f"Gemini Analysis Failed: {e}")
+        return None
+
+def find_timestamps_from_text(start_phrase, end_phrase, events):
+    # Fuzzy match logic or simple strict match
+    # Since Gemini returns exact text from transcript, we try to find the best matching events.
+    
+    # Simplify text for matching (lowercase, remove punctuation)
+    def clean(t): return re.sub(r'[^\w\s]', '', t.lower())
+    
+    start_phrase_clean = clean(start_phrase)
+    end_phrase_clean = clean(end_phrase)
+    
+    start_time = None
+    end_time = None
+    
+    # 1. Find Start
+    for i, ev in enumerate(events):
+        ev_text = clean(ev['text'])
+        # Check if start phrase is in this event or starts here
+        if start_phrase_clean in ev_text or ev_text.startswith(start_phrase_clean[:10]):
+            start_time = ev['start']
+            # Refine: If we matched inside the segment, maybe interpolate? 
+            # For now, safe start is the event start.
+            break
+            
+    # 2. Find End (search from start index?)
+    for ev in events:
+        if start_time and ev['start'] < start_time: continue
+        
+        ev_text = clean(ev['text'])
+        if end_phrase_clean in ev_text or ev_text.endswith(end_phrase_clean[-10:]):
+            end_time = ev['end']
+    
+    if start_time is not None and end_time is not None:
+        return start_time, end_time
+    
+    return None, None
+
 @app.get("/most-replayed")
 def get_replayed_parts(videoId: str, numberOfParts: int = None):
     print(f"Analyzing viral segments for {videoId} (Target: {'Auto' if numberOfParts is None else numberOfParts} parts)")
@@ -166,61 +334,47 @@ def get_replayed_parts(videoId: str, numberOfParts: int = None):
             # Fetch metadata
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={videoId}", download=False)
             
-            # Fetch subtitles for alignment
-            subtitles = get_params_for_subtitles(info)
+            # Fetch subtitles
+            subtitles = get_params_for_subtitles(info, videoId)
             if subtitles:
-                print(f"Fetched {len(subtitles)} subtitle lines for alignment.")
+                print(f"Fetched {len(subtitles)} subtitle lines.")
 
             if 'heatmap' not in info:
                 print("No heatmap data found.")
                 return {"replayedParts": []}
 
-            heatmap = info['heatmap'] # List of {start_time, end_time, value}
-            
-            # 1. Data Preparation
-            # Convert to numpy arrays for signal processing
+            heatmap = info['heatmap'] 
             times = np.array([(p['start_time'] + p['end_time'])/2 for p in heatmap])
             values = np.array([p.get('value', 0) for p in heatmap])
             
-            if len(values) < 5:
-                # Fallback for very short/no data
-                return {"replayedParts": []}
+            if len(values) < 5: return {"replayedParts": []}
 
-            # 2. Smoothing (Simple Moving Average)
+            # Smoothing
             window_size = 5
             kernel = np.ones(window_size) / window_size
             smoothed_values = np.convolve(values, kernel, mode='same')
             
-            # 3. Peak Detection
-            # Find local maxima indices
+            # Peak Detection
             peaks = []
-            # Calculate dynamic global threshold (mean + 0.5std) to ignore low-interest noise
             global_threshold = np.mean(smoothed_values) + 0.5 * np.std(smoothed_values)
-            
             for i in range(1, len(smoothed_values) - 1):
                 if (smoothed_values[i] > smoothed_values[i-1] and 
                     smoothed_values[i] > smoothed_values[i+1] and 
                     smoothed_values[i] > global_threshold):
                     peaks.append(i)
             
-            # Sort peaks by intensity (highest value first)
             peaks.sort(key=lambda i: smoothed_values[i], reverse=True)
             
-            # Auto-detect limit: Top peaks usually cover the best viral moments for Shorts
-            # Only take peaks that are at least 60% as strong as the max peak
+            # Auto-detect limit
             if numberOfParts is None:
-                if not peaks:
-                     max_limit = 0
+                if not peaks: max_limit = 0
                 else:
                     max_peak_val = smoothed_values[peaks[0]]
                     max_limit = 0
                     for p_idx in peaks:
-                        # Safety check for divide by zero (though peak > threshold > 0)
                         if max_peak_val > 0 and smoothed_values[p_idx] >= (max_peak_val * 0.6): 
                             max_limit += 1
-                        else:
-                            break
-                    # Allow up to 10 parts if they are high quality
+                        else: break
                     max_limit = max(1, min(max_limit, 10))
             else:
                 max_limit = numberOfParts
@@ -233,76 +387,95 @@ def get_replayed_parts(videoId: str, numberOfParts: int = None):
                         return True
                 return False
 
-            # 4. Region Growing & Selection
             for peak_idx in peaks:
-                if len(selected_parts) >= max_limit:
-                    break
+                if len(selected_parts) >= max_limit: break
                 
-                # Expand to find context
+                # --- BROAD REGION GROWING (Search Window) ---
+                # Expand up to ~5 mins total (2.5m each side) to give Gemini context
                 left_idx = peak_idx
                 right_idx = peak_idx
                 current_value = smoothed_values[peak_idx]
+                retention_floor = current_value * 0.3 # Lower floor for broad context
                 
-                # Dynamic Thresholds based on this specific peak's height
-                retention_floor = current_value * 0.5 
+                # 150s * 2 approx 5 mins max
+                MAX_SEARCH_SEC = 150 
                 
-                # Expand Left (Look for the "Hook" - steep rise)
                 while left_idx > 0:
                      if smoothed_values[left_idx-1] < retention_floor: break
                      left_idx -= 1
-                     if (times[peak_idx] - times[left_idx]) > 45: break
+                     if (times[peak_idx] - times[left_idx]) > MAX_SEARCH_SEC: break
 
-                # Expand Right (Resolution)
                 while right_idx < len(smoothed_values) - 1:
                     if smoothed_values[right_idx+1] < retention_floor: break
                     right_idx += 1
-                    if (times[right_idx] - times[peak_idx]) > 45: break
+                    if (times[right_idx] - times[peak_idx]) > MAX_SEARCH_SEC: break
                 
-                # 5. Optimization for Shorts format
-                start_time = heatmap[left_idx]['start_time']
-                end_time = heatmap[right_idx]['end_time']
-                duration = end_time - start_time
+                search_start = heatmap[left_idx]['start_time']
+                search_end = heatmap[right_idx]['end_time']
                 
-                # Enforce Constraints (15s - 60s)
-                TARGET_MIN = 15
-                TARGET_MAX = 60
+                # Default "dumb" cut (Fallback)
+                final_start = search_start
+                final_end = search_end
                 
-                if duration < TARGET_MIN:
-                    # Expand symmetrically to meet min duration
-                    padding = (TARGET_MIN - duration) / 2
-                    start_time = max(0, start_time - padding)
-                    end_time = end_time + padding
-                elif duration > TARGET_MAX:
-                    # Trim. Center the peak.
-                    center = times[peak_idx]
-                    start_time = max(0, center - (TARGET_MAX * 0.4)) # 40% before peak
-                    end_time = start_time + TARGET_MAX
+                # Constrain fallback to 60s around peak
+                peak_time = times[peak_idx]
+                fallback_start = max(0, peak_time - 30)
+                fallback_end = peak_time + 30
                 
-                # --- SUBTITLE ALIGNMENT START ---
-                if subtitles:
-                    aligned_start, aligned_end = align_to_sentence(start_time, end_time, subtitles)
-                    # Only apply if it makes sense (not drifting too far from heatmap peak)
-                    # Check if peak is still inside or close
-                    peak_time = times[peak_idx]
-                    if aligned_start <= peak_time and aligned_end >= peak_time:
-                         start_time = aligned_start
-                         end_time = aligned_end
-                # --- SUBTITLE ALIGNMENT END ---
+                gemini_success = False
 
-                if not is_overlapping(start_time, end_time, selected_parts):
+                # --- GEMINI ANALYSIS ---
+                if subtitles:
+                    # extract transcript for search window
+                    window_subs = [s for s in subtitles if s['end'] > search_start and s['start'] < search_end]
+                    
+                    if len(window_subs) > 5: # Only analyze if we have enough context
+                        print(f"Asking Gemini to analyze {len(window_subs)} lines region ({search_start:.1f}-{search_end:.1f})...")
+                        analysis = analyze_with_gemini(window_subs)
+                        
+                        if analysis:
+                            print(f"Gemini proposed: {analysis.get('reason')}")
+                            g_start, g_end = find_timestamps_from_text(analysis['start_phrase'], analysis['end_phrase'], window_subs)
+                            
+                            if g_start is not None and g_end is not None:
+                                duration = g_end - g_start
+                                if 10 <= duration <= 90: # Allow slight flexibility for formatting
+                                    final_start = g_start
+                                    final_end = g_end
+                                    gemini_success = True
+                
+                if not gemini_success:
+                    print(f"  > Fallback to heatmap alignment (Gemini success: {gemini_success})")
+                    # Fallback method: simple sentence alignment on 60s chunk
+                    final_start = fallback_start
+                    final_end = fallback_end
+                    if subtitles:
+                        final_start, final_end = align_to_sentence(final_start, final_end, subtitles)
+
+                # Final constraints check
+                duration = final_end - final_start
+                if duration > 65: # Hard cap
+                    center = (final_start + final_end) / 2
+                    final_start = center - 30
+                    final_end = center + 30
+                
+                print(f"  > Finalizing Clip: {final_start}-{final_end} (Method: {'gemini' if gemini_success else 'heatmap'})")
+
+                if not is_overlapping(final_start, final_end, selected_parts):
                      selected_parts.append({
-                        "start": round(start_time, 1),
-                        "end": round(end_time, 1),
+                        "start": round(final_start, 1),
+                        "end": round(final_end, 1),
                         "position": len(selected_parts) + 1,
-                        "duration": round(end_time - start_time, 1),
-                        "score": round(float(smoothed_values[peak_idx]), 2)
+                        "duration": round(final_end - final_start, 1),
+                        "score": round(float(smoothed_values[peak_idx]), 2),
+                        "method": "gemini" if gemini_success else "heatmap_alignment"
                     })
             
-            # Sort by chronological order for final output
             selected_parts.sort(key=lambda x: x['start'])
             for i, part in enumerate(selected_parts):
                 part['position'] = i + 1
-
+            
+            print(f"Analyze complete. Found {len(selected_parts)} parts.")
             return {"replayedParts": selected_parts}
 
     except Exception as e:
