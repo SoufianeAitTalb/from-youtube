@@ -33,115 +33,105 @@ def read_root():
 
 # Helper: Fetch and Parse Subtitles
 def get_params_for_subtitles(info, video_id=None):
-    subs = info.get('subtitles') or {}
-    auto_subs = info.get('automatic_captions') or {}
-    
-    # Priority: Manual 'en' -> Auto 'en' -> Manual 'auto' -> ...
-    # Prefer json3 format for easy parsing
-    target_lang = 'en'
-    
-    url = None
-    
-    # Try finding in manual
-    if target_lang in subs:
-        for fmt in subs[target_lang]:
-            if fmt.get('ext') == 'json3':
-                url = fmt['url']
-                break
-    
-    # Try finding in auto
-    if not url and target_lang in auto_subs:
-        for fmt in auto_subs[target_lang]:
-            if fmt.get('ext') == 'json3':
-                url = fmt['url']
-                break
-                
-    if not url: return []
+    if not video_id:
+        return []
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    print("Fetching subtitles using youtube-transcript-api...")
     
-    # Use headers from yt-dlp info if available
-    if info.get('http_headers') and info['http_headers'].get('User-Agent'):
-        headers['User-Agent'] = info['http_headers']['User-Agent']
-
-    resp = None
-    for attempt in range(3):
-        try:
-            print(f"Fetching subtitles from: {url} (Attempt {attempt+1})")
-            resp = requests.get(url, headers=headers, timeout=10)
-            if resp.status_code == 200:
-                break
-            elif resp.status_code == 429:
-                wait_time = (2 ** attempt) + random.random()
-                print(f"Got 429, waiting {wait_time:.1f}s...")
-                time.sleep(wait_time)
-            else:
-                print(f"Subtitle fetch failed: {resp.status_code} - {resp.text[:200]}")
-                # For non-429 errors, we might want to fail fast or continue. 
-                # YouTube often returns 4xx for expired URLs, so maybe just failing is correct.
-                # But let's retry 403 just in case? Usually 403 is fatal without fresh sig.
-                pass 
-        except Exception as e:
-            print(f"Request error: {e}")
-            time.sleep(1)
-            
-    if not resp or resp.status_code != 200:
-        print("Failed to fetch subtitles after retries.")
+    if not YouTubeTranscriptApi:
+        print("youtube-transcript-api not installed/available.")
         return []
 
     try:
-        data = resp.json()
+        # 1. Try list_transcripts (Modern API)
+        if hasattr(YouTubeTranscriptApi, 'list_transcripts'):
+            try:
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                
+                # Priority: Manual English -> Manual Native -> Generated English -> Generated Native -> Any
+                transcript = None
+                
+                try:
+                    transcript = transcript_list.find_manually_created_transcript(['en'])
+                except:
+                    try:
+                        transcript = transcript_list.find_generated_transcript(['en'])
+                    except:
+                        # Iterate and pick first available (any language)
+                        for t in transcript_list:
+                            print(f"Found transcript: {t.language} ({t.language_code})")
+                            transcript = t
+                            break
+                
+                if transcript:
+                    print(f"Fetching transcript content for: {transcript.language}...")
+                    data = transcript.fetch()
+                    print("Transcript fetch complete.")
+                    
+                    events = []
+                    for item in data:
+                        events.append({
+                            "start": item['start'],
+                            "end": item['start'] + item['duration'],
+                            "text": item['text']
+                        })
+                    print(f"Success! Found {len(events)} lines.")
+                    return events
+                else:
+                    print("No suitable transcript found in list.")
+                    
+            except Exception as e:
+                 print(f"Error listing transcripts: {e}")
+                 # Fall through to legacy/backup methods
         
-        # Parse JSON3 to simple list of {start, end, text}
-        events = []
-        if 'events' in data:
-            for ev in data['events']:
-                if 'tStartMs' not in ev: continue
-                start = ev['tStartMs'] / 1000.0
-                duration = ev.get('dDurationMs', 0) / 1000.0
-                end = start + duration
-                
-                # Extract text
-                text = ""
-                if 'segs' in ev:
-                    text = "".join([s.get('utf8', '') for s in ev['segs']])
-                
+        # 2. Try get_transcript (Static Fallback)
+        if hasattr(YouTubeTranscriptApi, 'get_transcript'):
+            print("Using get_transcript fallback...")
+            try:
+                data = YouTubeTranscriptApi.get_transcript(video_id) # Defaults to 'en'
+            except Exception as e:
+                 print(f"get_transcript('en') failed: {e}")
+                 # Try common languages
+                 print("Trying common languages: ar, fr, es, de...")
+                 data = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'ar', 'fr', 'es', 'de'])
+
+            events = []
+            for item in data:
                 events.append({
-                    "start": start,
-                    "end": end,
-                    "text": text.strip()
+                    "start": item['start'],
+                    "end": item['start'] + item['duration'],
+                    "text": item['text']
                 })
-        return events
-    except Exception as e:
-        print(f"Error fetching subtitles: {e}")
-        try:
-             print(f"Response content debug: {resp.text[:500]}")
-        except: pass
-        
-    # Fallback to youtube-transcript-api if available and requests failed
-    if YouTubeTranscriptApi and video_id:
-        print("Trying youtube-transcript-api fallback...")
-        try:
-            # Handle version differences (static vs instance)
-            if hasattr(YouTubeTranscriptApi, 'get_transcript'):
-                data = YouTubeTranscriptApi.get_transcript(video_id)
-                # Standad format: list of dicts {text, start, duration}
-                events = []
-                for item in data:
-                    events.append({
-                        "start": item['start'],
-                        "end": item['start'] + item['duration'],
-                        "text": item['text']
-                    })
-                print(f"Fallback success! Found {len(events)} lines.")
-                return events
-            else:
-                # Assuming quirk 1.2.3 version (instance method)
-                api = YouTubeTranscriptApi()
+            print(f"Success! Found {len(events)} lines.")
+            return events
+
+        # 3. Legacy / Instance Fallback (for older versions/forks)
+        else:
+            print("Using legacy instance fallback...")
+            api = YouTubeTranscriptApi()
+            try:
+                print("Attempting to fetch with language list...")
+                trans = api.fetch(video_id, languages=['en', 'ar', 'fr', 'es', 'de'])
+            except TypeError:
+                print("Legacy fetch does not support 'languages', trying default...")
                 trans = api.fetch(video_id)
-                if trans and hasattr(trans, 'snippets'):
+            except Exception as e:
+                print(f"Legacy fetch failed with languages: {e}")
+                trans = api.fetch(video_id) # Last ditch
+
+            if trans:
+                 # Handle different return types
+                if isinstance(trans, list):
+                     events = []
+                     for item in trans:
+                        events.append({
+                            "start": item['start'],
+                            "end": item['start'] + item['duration'],
+                            "text": item['text']
+                        })
+                     print(f"Success! Found {len(events)} lines.")
+                     return events
+                elif hasattr(trans, 'snippets'):
                     events = []
                     for s in trans.snippets:
                          events.append({
@@ -149,10 +139,13 @@ def get_params_for_subtitles(info, video_id=None):
                             "end": s.start + s.duration,
                             "text": s.text
                         })
-                    print(f"Fallback success! Found {len(events)} lines.")
+                    print(f"Success! Found {len(events)} lines.")
                     return events
-        except Exception as e:
-            print(f"Fallback failed: {e}")
+                else:
+                     print(f"Unknown transcript object type: {type(trans)}")
+
+    except Exception as e:
+        print(f"All subtitle fetch methods failed: {e}")
 
     return []
 
@@ -235,7 +228,7 @@ except ImportError:
 
 # Configure Gemini
 # NOTE: In production, use os.environ.get("GEMINI_API_KEY")
-GENAI_API_KEY = "AIzaSyBa5XEk8enhhzI-QCJptFOigttDyYwmMFU"
+GENAI_API_KEY = "AIzaSyC5cstglRSP2q_J5XxE7Any4TzdKa6IvZQ"
 genai.configure(api_key=GENAI_API_KEY)
 
 # Helper: Analyze with Gemini
@@ -259,8 +252,11 @@ def analyze_with_gemini(transcript_events):
     
     Instructions:
     1. Select a continuous part that stands on its own (has a hook and a punchline/conclusion).
-    2. Ensure the duration is between 15s and 60s (approx 40-160 words).
-    3. Return the EXACT start phrase (first 5-10 words) and end phrase (last 5-10 words) of your selected clip.
+    2. **STRICT CONSTRAINT: The duration MUST be between 30 and 55 seconds.**
+       - 60 seconds is the ABSOLUTE HARD LIMIT. Do not even risk 59s. Target 45s.
+       - If the interesting section is longer, find the *best continuous 45s segment* within it.
+    3. Return the EXACT start phrase (first 5-10 words) and end phrase (last 5-10 words) of your selected clip. 
+       IMPORTANT: The start_phrase and end_phrase MUST be exact substrings from the provided transcript. DO NOT TRANSLATE them. Use the same language as the transcript.
     
     Output Format (JSON):
     {{
@@ -270,50 +266,142 @@ def analyze_with_gemini(transcript_events):
     }}
     """
     
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
-        result = json.loads(response.text)
-        return result
-    except Exception as e:
-        print(f"Gemini Analysis Failed: {e}")
-        return None
+    patience = 20
+    
+    models_to_try = [
+        'models/gemini-3-flash-preview', 
+        'models/gemini-flash-latest'
+    ]
+    
+    for i, model_name in enumerate(models_to_try):
+        is_last_model = (i == len(models_to_try) - 1)
+        # If it's the last resort (Flash), retry aggressively with waiting.
+        # If it's the first preference (Pro), fail fast to switch to Flash.
+        retries = 3 if is_last_model else 1
+        
+        for attempt in range(retries):
+            try:
+                print(f"Requesting Gemini analysis using: {model_name} (Attempt {attempt+1})...")
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+                result = json.loads(response.text)
+                return result
+            except Exception as e:
+                is_rate_limit = "429" in str(e) or "Quota exceeded" in str(e)
+                
+                if is_rate_limit:
+                    if is_last_model and attempt < retries - 1:
+                        wait_time = 20 * (attempt + 1)
+                        print(f"Rate limit for fallback ({model_name}). Waiting {wait_time}s to retry...")
+                        time.sleep(wait_time)
+                        continue # Retry same model
+                    else:
+                        print(f"Rate limit hit for {model_name}. Switching/Failing...")
+                        break # Go to next model in outer loop
+                else:
+                    print(f"Error with {model_name}: {e}")
+                    break # Non-rate limit error, try next model
+
+    print("All Gemini models failed or rate limited.")
+    return None
 
 def find_timestamps_from_text(start_phrase, end_phrase, events):
-    # Fuzzy match logic or simple strict match
-    # Since Gemini returns exact text from transcript, we try to find the best matching events.
-    
-    # Simplify text for matching (lowercase, remove punctuation)
-    def clean(t): return re.sub(r'[^\w\s]', '', t.lower())
-    
+    if not events: return None, None
+
+    # Normalization function
+    def clean(t): 
+        # Remove special chars, extra spaces, lower case
+        text = re.sub(r'[^\w\s]', '', t.lower())
+        # Arabic Normalization
+        text = re.sub(r'[أإآ]', 'ا', text) # Normalize Alefs
+        text = re.sub(r'ة', 'ه', text)      # Normalize Taa Marbuta
+        text = re.sub(r'ى', 'ي', text)      # Normalize Alef Maqsura
+        text = re.sub(r'ؤ', 'و', text)      # Normalize Waw Hamza - optional but can help
+        return re.sub(r'\s+', ' ', text).strip()
+
     start_phrase_clean = clean(start_phrase)
     end_phrase_clean = clean(end_phrase)
     
+    print(f"  > Searching for Start: '{start_phrase_clean}'")
+    print(f"  > Searching for End:   '{end_phrase_clean}'")
+
+    # Build a full text string and a map from char index to event
+    full_text = ""
+    char_to_event_map = []
+    
+    for i, ev in enumerate(events):
+        ev_text = clean(ev['text'])
+        if not ev_text:
+            continue
+            
+        # Add space separator if not start
+        if full_text:
+            full_text += " "
+            char_to_event_map.append(None) # Gap
+            
+        start_idx = len(full_text)
+        full_text += ev_text
+        # Map every character in this segment to the event index
+        char_to_event_map.extend([i] * len(ev_text))
+
+    # Search
     start_time = None
     end_time = None
     
-    # 1. Find Start
-    for i, ev in enumerate(events):
-        ev_text = clean(ev['text'])
-        # Check if start phrase is in this event or starts here
-        if start_phrase_clean in ev_text or ev_text.startswith(start_phrase_clean[:10]):
-            start_time = ev['start']
-            # Refine: If we matched inside the segment, maybe interpolate? 
-            # For now, safe start is the event start.
-            break
-            
-    # 2. Find End (search from start index?)
-    for ev in events:
-        if start_time and ev['start'] < start_time: continue
+    # Fuzzy/Approx search for Start
+    # Try exact first
+    s_idx = full_text.find(start_phrase_clean)
+    if s_idx != -1:
+        # Found exact match
+        # Map char index back to event
+        # If it hits a gap (None), move forward
+        while s_idx < len(char_to_event_map) and char_to_event_map[s_idx] is None:
+            s_idx += 1
         
-        ev_text = clean(ev['text'])
-        if end_phrase_clean in ev_text or ev_text.endswith(end_phrase_clean[-10:]):
-            end_time = ev['end']
+        if s_idx < len(char_to_event_map):
+            ev_idx = char_to_event_map[s_idx]
+            start_time = events[ev_idx]['start']
+    else:
+        # Fallback: Try matching first 20 chars
+        short_start = start_phrase_clean[:20]
+        if len(short_start) > 5:
+            s_idx = full_text.find(short_start)
+            if s_idx != -1:
+                while s_idx < len(char_to_event_map) and char_to_event_map[s_idx] is None:
+                    s_idx += 1
+                if s_idx < len(char_to_event_map):
+                    ev_idx = char_to_event_map[s_idx]
+                    start_time = events[ev_idx]['start']
+
+    # Search for End
+    # Try exact
+    e_idx = full_text.find(end_phrase_clean, s_idx if s_idx != -1 else 0)
+    if e_idx != -1:
+        # Map to event (end of phrase)
+        end_char = e_idx + len(end_phrase_clean) - 1
+        ensure_idx = min(end_char, len(char_to_event_map) - 1)
+        
+        while ensure_idx >= 0 and char_to_event_map[ensure_idx] is None:
+            ensure_idx -= 1
+            
+        if ensure_idx >= 0:
+            ev_idx = char_to_event_map[ensure_idx]
+            end_time = events[ev_idx]['end']
+    else:
+         # Fallback: Try matching last 20 chars
+        short_end = end_phrase_clean[-20:]
+        if len(short_end) > 5:
+            e_idx = full_text.find(short_end, s_idx if s_idx != -1 else 0)
+            if e_idx != -1:
+                end_char = e_idx + len(short_end) - 1
+                ensure_idx = min(end_char, len(char_to_event_map) - 1)
+                while ensure_idx >= 0 and char_to_event_map[ensure_idx] is None:
+                    ensure_idx -= 1
+                if ensure_idx >= 0:
+                    ev_idx = char_to_event_map[ensure_idx]
+                    end_time = events[ev_idx]['end']
     
-    if start_time is not None and end_time is not None:
-        return start_time, end_time
-    
-    return None, None
+    return start_time, end_time
 
 @app.get("/most-replayed")
 def get_replayed_parts(videoId: str, numberOfParts: int = None):
@@ -435,14 +523,30 @@ def get_replayed_parts(videoId: str, numberOfParts: int = None):
                         
                         if analysis:
                             print(f"Gemini proposed: {analysis.get('reason')}")
-                            g_start, g_end = find_timestamps_from_text(analysis['start_phrase'], analysis['end_phrase'], window_subs)
+                            s_phrase = analysis.get('start_phrase', '')
+                            e_phrase = analysis.get('end_phrase', '')
+                            print(f"  > Start Phrase: '{s_phrase}'")
+                            print(f"  > End Phrase:   '{e_phrase}'")
+                            
+                            g_start, g_end = find_timestamps_from_text(s_phrase, e_phrase, window_subs)
+                            print(f"  > Matched Times: {g_start} - {g_end}")
                             
                             if g_start is not None and g_end is not None:
                                 duration = g_end - g_start
-                                if 10 <= duration <= 90: # Allow slight flexibility for formatting
+                                if duration < 5:
+                                     print(f"  > Duration {duration}s too short.")
+                                else:
                                     final_start = g_start
                                     final_end = g_end
+                                    
+                                    # Clamp to 60s if too long (Shorts limit)
+                                    if duration > 60:
+                                        print(f"  > Duration {duration}s exceeds limit. Clamping to 60s.")
+                                        final_end = final_start + 60
+                                    
                                     gemini_success = True
+                            else:
+                                print(f"  > Failed to match phrases in transcript.")
                 
                 if not gemini_success:
                     print(f"  > Fallback to heatmap alignment (Gemini success: {gemini_success})")
